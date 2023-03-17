@@ -1,9 +1,14 @@
 // https://github.com/espressif/arduino-esp32/tree/master/libraries/ESP32/examples/Camera/CameraWebServer
+// https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server/restful_server
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
+#include "esp_spiffs.h"
+
+static const char *TAG = "example";
+static const char *REST_TAG = "esp-rest";
 
 // ===================
 // Access Point
@@ -53,8 +58,132 @@ static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 int port_number;
 
+// ===================
+// SPIFFS
+// ===================
+esp_err_t init_fs(void)
+{
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/www",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = false
+    };
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            //ESP_LOGE(TAG, "Failed to mount or format filesystem");
+            Serial.println("Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            //ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+            Serial.println("Failed to find SPIFFS partition");
+        } else {
+            //ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+            Serial.print("Failed to initialize SPIFFS ");
+            Serial.println(esp_err_to_name(ret));
+        }
+        return ESP_FAIL;
+    }
+
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(NULL, &total, &used);
+    if (ret != ESP_OK) {
+        //ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+        Serial.print("Failed to get SPIFFS partition information");
+        Serial.println(esp_err_to_name(ret));
+    } else {
+        Serial.print("Partition size: total:");
+        Serial.print(total);
+        Serial.print(" ,");
+        Serial.println(used);
+        //ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+    }
+    return ESP_OK;
+}
+
+// ===================
+// Web App
+// ===================
+#define ESP_VFS_PATH_MAX 10
+#define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
+#define SCRATCH_BUFSIZE (10240)
+
+typedef struct rest_server_context {
+    char base_path[ESP_VFS_PATH_MAX + 1];
+    char scratch[SCRATCH_BUFSIZE];
+} rest_server_context_t;
+
+#define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
+
+static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepath){
+    const char *type = "text/plain";
+    if (CHECK_FILE_EXTENSION(filepath, ".html")) {
+        type = "text/html";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".js")) {
+        type = "application/javascript";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".css")) {
+        type = "text/css";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".png")) {
+        type = "image/png";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".ico")) {
+        type = "image/x-icon";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".svg")) {
+        type = "text/xml";
+    }
+    return httpd_resp_set_type(req, type);
+}
+
+static esp_err_t webapp_handler(httpd_req_t *req){
+    char filepath[FILE_PATH_MAX];
+
+    rest_server_context_t *rest_context = (rest_server_context_t *)req->user_ctx;
+    strlcpy(filepath, rest_context->base_path, sizeof(filepath));
+    if (req->uri[strlen(req->uri) - 1] == '/') {
+        strlcat(filepath, "/index.html", sizeof(filepath));
+    } else {
+        strlcat(filepath, req->uri, sizeof(filepath));
+    }
+    int fd = open(filepath, O_RDONLY, 0);
+    if (fd == -1) {
+        ESP_LOGE(REST_TAG, "Failed to open file : %s", filepath);
+        /* Respond with 500 Internal Server Error */
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file");
+        return ESP_FAIL;
+    }
+
+    set_content_type_from_file(req, filepath);
+
+    char *chunk = rest_context->scratch;
+    ssize_t read_bytes;
+    do {
+        /* Read file in chunks into the scratch buffer */
+        read_bytes = read(fd, chunk, SCRATCH_BUFSIZE);
+        if (read_bytes == -1) {
+            ESP_LOGE(REST_TAG, "Failed to read file : %s", filepath);
+        } else if (read_bytes > 0) {
+            /* Send the buffer contents as HTTP response chunk */
+            if (httpd_resp_send_chunk(req, chunk, read_bytes) != ESP_OK) {
+                close(fd);
+                ESP_LOGE(REST_TAG, "File sending failed!");
+                /* Abort sending file */
+                httpd_resp_sendstr_chunk(req, NULL);
+                /* Respond with 500 Internal Server Error */
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file");
+                return ESP_FAIL;
+            }
+        }
+    } while (read_bytes > 0);
+    /* Close file after sending complete */
+    close(fd);
+    ESP_LOGI(REST_TAG, "File sending complete");
+    /* Respond with an empty chunk to signal HTTP response completion */
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
 httpd_handle_t stream_httpd = NULL;
-httpd_handle_t camera_httpd = NULL;
+httpd_handle_t webapp_httpd = NULL;
 
 static esp_err_t stream_handler(httpd_req_t *req) {
   camera_fb_t * fb = NULL;
@@ -125,29 +254,20 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   return res;
 }
 
-static esp_err_t web_handler(httpd_req_t *req){
-    static char json_response[1024];
-
-    char * p = json_response;
-    *p++ = '{';
-    p+=sprintf(p, "\"port\":%d", port_number);
-    *p++ = '}';
-    *p++ = 0;
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    return httpd_resp_send(req, json_response, strlen(json_response));
-}
-
-void startCameraServer() {
+void start_server(const char *base_path){
+  rest_server_context_t *rest_context = (rest_server_context_t*)calloc(1, sizeof(rest_server_context_t));
+  strlcpy(rest_context->base_path, base_path, sizeof(rest_context->base_path));
+  
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.uri_match_fn = httpd_uri_match_wildcard;
 
-  httpd_uri_t index_uri = {
-    .uri       = "/",
-    .method    = HTTP_GET,
-    .handler   = web_handler,
-    .user_ctx  = NULL
+  httpd_uri_t webapp_get_uri = {
+      .uri = "/*",
+      .method = HTTP_GET,
+      .handler = webapp_handler,
+      .user_ctx = rest_context
   };
-
+  
   httpd_uri_t stream_uri = {
     .uri       = "/stream",
     .method    = HTTP_GET,
@@ -156,8 +276,8 @@ void startCameraServer() {
   };
 
   Serial.printf("Web server started on port: '%d'\n", config.server_port);
-  if (httpd_start(&camera_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(camera_httpd, &index_uri);
+  if (httpd_start(&webapp_httpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(webapp_httpd, &webapp_get_uri);
   }
 
   config.server_port += 1;
@@ -169,6 +289,15 @@ void startCameraServer() {
   }
 
   port_number = config.server_port;
+}
+
+void init_wifi(){
+  Serial.println("\n[*] Creating AP");
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(local_ip, gateway, subnet);
+  WiFi.softAP(ssid, password, channel, hide_SSID, max_connection);
+  Serial.print("[+] AP Created with IP Gateway ");
+  Serial.println(WiFi.softAPIP());
 }
 
 void setup(){
@@ -239,17 +368,17 @@ void setup(){
   if(config.pixel_format == PIXFORMAT_JPEG){
     s->set_framesize(s, FRAMESIZE_QVGA);
   }
-    Serial.println("\n[*] Creating AP");
-    WiFi.mode(WIFI_AP);
-    WiFi.softAPConfig(local_ip, gateway, subnet);
-    WiFi.softAP(ssid, password, channel, hide_SSID, max_connection);
-    Serial.print("[+] AP Created with IP Gateway ");
-    Serial.println(WiFi.softAPIP());
 
-    startCameraServer();
+  // fs init
+  init_fs();
+
+  // wifi init
+  init_wifi();
+
+  // start webapp and stream server
+  start_server("/www");
 }
 
 void loop(){
-
-    delay(10000);
+  delay(10000);
 }
