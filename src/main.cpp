@@ -1,11 +1,13 @@
 // https://github.com/espressif/arduino-esp32/tree/master/libraries/ESP32/examples/Camera/CameraWebServer
 // https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server/restful_server
+// https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/ws_echo_server
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
 #include "esp_spiffs.h"
+#include "cJSON.h"
 
 static const char *TAG = "example";
 static const char *REST_TAG = "esp-rest";
@@ -48,6 +50,7 @@ IPAddress local_IP(192, 168, 1, 80);
 #define VSYNC_GPIO_NUM    25
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
+camera_config_t config;
 
 // ===================
 // Stream Server
@@ -184,6 +187,76 @@ static esp_err_t webapp_handler(httpd_req_t *req){
 
 httpd_handle_t stream_httpd = NULL;
 httpd_handle_t webapp_httpd = NULL;
+httpd_handle_t websocket_httpd = NULL;
+
+static void ws_payload_handler(char *payload){
+  //Serial.println(payload);
+  const cJSON *cmd_type = NULL;
+  cJSON *cmd_json = cJSON_Parse(payload);
+  if (cmd_json == NULL){
+      const char *error_ptr = cJSON_GetErrorPtr();
+      if (error_ptr != NULL)
+      {
+          Serial.printf("Error before: %s\n", error_ptr);
+      }
+    cJSON_Delete(cmd_json);
+    return;
+  }
+
+    cmd_type = cJSON_GetObjectItemCaseSensitive(cmd_json, "type");
+    if (cJSON_IsString(cmd_type) && (cmd_type->valuestring != NULL))
+    {
+        Serial.printf("Checking type \"%s\"\n", cmd_type->valuestring);
+    }
+
+}
+
+static esp_err_t ws_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) {
+        ESP_LOGI(TAG, "Handshake done, the new connection was opened");
+        return ESP_OK;
+    }
+    httpd_ws_frame_t ws_pkt;
+    uint8_t *buf = NULL;
+    memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
+    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+    /* Set max_len = 0 to get the frame len */
+    esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_ws_recv_frame failed to get frame len with %d", ret);
+        return ret;
+    }
+    ESP_LOGI(TAG, "frame len is %d", ws_pkt.len);
+    if (ws_pkt.len) {
+        /* ws_pkt.len + 1 is for NULL termination as we are expecting a string */
+        buf = (uint8_t*)calloc(1, ws_pkt.len + 1);
+        if (buf == NULL) {
+            ESP_LOGE(TAG, "Failed to calloc memory for buf");
+            return ESP_ERR_NO_MEM;
+        }
+        ws_pkt.payload = buf;
+        /* Set max_len = ws_pkt.len to get the frame payload */
+        ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "httpd_ws_recv_frame failed with %d", ret);
+            free(buf);
+            return ret;
+        }
+        ESP_LOGI(TAG, "Got packet with message: %s", ws_pkt.payload);
+    }
+    ESP_LOGI(TAG, "Packet type: %d", ws_pkt.type);
+    if (ws_pkt.type == HTTPD_WS_TYPE_TEXT){
+      ws_payload_handler((char*)ws_pkt.payload);
+    }
+
+    ret = httpd_ws_send_frame(req, &ws_pkt);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_ws_send_frame failed with %d", ret);
+    }
+    free(buf);
+    return ret;
+}
 
 static esp_err_t stream_handler(httpd_req_t *req) {
   camera_fb_t * fb = NULL;
@@ -275,6 +348,14 @@ void start_server(const char *base_path){
     .user_ctx  = NULL
   };
 
+   httpd_uri_t ws_uri = {
+          .uri        = "/ws",
+          .method     = HTTP_GET,
+          .handler    = ws_handler,
+          .user_ctx   = NULL,
+          .is_websocket = true
+  };
+
   Serial.printf("Web server started on port: '%d'\n", config.server_port);
   if (httpd_start(&webapp_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(webapp_httpd, &webapp_get_uri);
@@ -289,6 +370,14 @@ void start_server(const char *base_path){
   }
 
   port_number = config.server_port;
+  config.server_port += 1;
+  config.ctrl_port += 1;
+
+  Serial.printf("Websocket server started on port: '%d'\n", config.server_port);
+  if (httpd_start(&websocket_httpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(websocket_httpd, &ws_uri);
+  }
+
 }
 
 void init_wifi(){
@@ -363,8 +452,6 @@ void init_camera(){
     s->set_framesize(s, FRAMESIZE_QVGA);
   }
 }
-
-camera_config_t config;
 
 void setup(){
   Serial.begin(115200);
