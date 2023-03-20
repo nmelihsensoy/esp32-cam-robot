@@ -300,12 +300,7 @@ void init_wifi(){
   Serial.println(WiFi.softAPIP());
 }
 
-void setup(){
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-  Serial.println();
-
-  camera_config_t config;
+void init_camera(){
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
@@ -350,7 +345,6 @@ void setup(){
     config.frame_size = FRAMESIZE_240X240;
   }
 
-  // camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
@@ -368,6 +362,17 @@ void setup(){
   if(config.pixel_format == PIXFORMAT_JPEG){
     s->set_framesize(s, FRAMESIZE_QVGA);
   }
+}
+
+camera_config_t config;
+
+void setup(){
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
+
+  // camera init
+  init_camera();
 
   // fs init
   init_fs();
