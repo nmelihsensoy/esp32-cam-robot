@@ -1,32 +1,22 @@
 <template>
   <div id="app">
-    <nav>
-      <router-link to="/">Home</router-link> |
-      <router-link to="/about">About</router-link>
-    </nav>
-    <router-view/>
+    <main class="container-fluid">
+      <nav>
+        <ul>
+          <li><router-link tag="a" to="/">Home</router-link></li>
+        </ul>
+        <ul>
+          <li><strong>Robot Control</strong></li>
+        </ul>
+        <ul>
+          <li><router-link tag="a" to="/about">Settings</router-link></li>
+        </ul>
+      </nav>
+      <router-view/>
+    </main>
   </div>
 </template>
 
 <style>
-#app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-align: center;
-  color: #2c3e50;
-}
 
-nav {
-  padding: 30px;
-}
-
-nav a {
-  font-weight: bold;
-  color: #2c3e50;
-}
-
-nav a.router-link-exact-active {
-  color: #42b983;
-}
 </style>
