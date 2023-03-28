@@ -19,7 +19,7 @@ const char* ssid           = "ssidtest";
 const char* password       = "wifipassword";
 const int   channel        = 10;
 const bool  hide_SSID      = false;                  
-const int   max_connection = 2;     
+const int   max_connection = 1;     
 
 // ===================
 // Static ip
@@ -60,6 +60,22 @@ static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" 
 static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 int port_number;
+
+// ===================
+// L298N
+// ===================
+#define MOTOR_LEFT_PIN_1 14
+#define MOTOR_LEFT_PIN_2 15
+#define MOTOR_RIGHT_PIN_1 13
+#define MOTOR_RIGHT_PIN_2 12
+
+enum DIR{
+  STOP = 0,
+  FORWARD = 1,
+  BACK = 2,
+  LEFT = 3,
+  RIGHT = 4
+};
 
 // ===================
 // SPIFFS
@@ -189,6 +205,63 @@ httpd_handle_t stream_httpd = NULL;
 httpd_handle_t webapp_httpd = NULL;
 httpd_handle_t websocket_httpd = NULL;
 
+static void robot_command_handler(cJSON *json){
+  const cJSON *direction = NULL;
+  DIR parsedDirection = STOP;
+  direction = cJSON_GetObjectItem(json, "dir");
+  parsedDirection = (DIR)direction->valueint;
+
+  switch (parsedDirection) {
+    case FORWARD:
+      digitalWrite(MOTOR_LEFT_PIN_1, 1);
+      digitalWrite(MOTOR_LEFT_PIN_2, 0);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 1);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
+    break;
+
+    case BACK:
+      digitalWrite(MOTOR_LEFT_PIN_1, 0);
+      digitalWrite(MOTOR_LEFT_PIN_2, 1);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 1);
+    break;
+
+    case LEFT:
+      digitalWrite(MOTOR_LEFT_PIN_1, 0);
+      digitalWrite(MOTOR_LEFT_PIN_2, 1);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 1);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
+    break;
+
+    case RIGHT:
+      digitalWrite(MOTOR_LEFT_PIN_1, 1);
+      digitalWrite(MOTOR_LEFT_PIN_2, 0);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 1);
+    break;
+
+    case STOP:
+      digitalWrite(MOTOR_LEFT_PIN_1, 0);
+      digitalWrite(MOTOR_LEFT_PIN_2, 0);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
+    break;
+
+    default:
+      digitalWrite(MOTOR_LEFT_PIN_1, 0);
+      digitalWrite(MOTOR_LEFT_PIN_2, 0);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
+    break;
+  }
+}
+
 static void ws_payload_handler(char *payload){
   //Serial.println(payload);
   const cJSON *cmd_type = NULL;
@@ -206,7 +279,11 @@ static void ws_payload_handler(char *payload){
     cmd_type = cJSON_GetObjectItemCaseSensitive(cmd_json, "type");
     if (cJSON_IsString(cmd_type) && (cmd_type->valuestring != NULL))
     {
-        Serial.printf("Checking type \"%s\"\n", cmd_type->valuestring);
+      Serial.printf("Checking type \"%s\"\n", cmd_type->valuestring);
+      if(strcmp(cmd_type->valuestring, "robot") == 0){
+        robot_command_handler(cmd_json);
+        cJSON_Delete(cmd_json);
+      }
     }
 
 }
@@ -380,6 +457,19 @@ void start_server(const char *base_path){
 
 }
 
+void init_motors(){
+  pinMode(MOTOR_LEFT_PIN_1, OUTPUT);
+  pinMode(MOTOR_LEFT_PIN_2, OUTPUT);
+  pinMode(MOTOR_RIGHT_PIN_1, OUTPUT);
+  pinMode(MOTOR_RIGHT_PIN_2, OUTPUT);
+
+  digitalWrite(MOTOR_LEFT_PIN_1, 1);
+  digitalWrite(MOTOR_LEFT_PIN_2, 1);
+  //
+  digitalWrite(MOTOR_RIGHT_PIN_1, 1);
+  digitalWrite(MOTOR_RIGHT_PIN_2, 1);
+}
+
 void init_wifi(){
   Serial.println("\n[*] Creating AP");
   WiFi.mode(WIFI_AP);
@@ -457,6 +547,8 @@ void setup(){
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+
+  init_motors();
 
   // camera init
   init_camera();
