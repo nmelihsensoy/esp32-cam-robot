@@ -213,35 +213,35 @@ static void robot_command_handler(cJSON *json){
 
   switch (parsedDirection) {
     case FORWARD:
-      digitalWrite(MOTOR_LEFT_PIN_1, 1);
-      digitalWrite(MOTOR_LEFT_PIN_2, 0);
+      digitalWrite(MOTOR_LEFT_PIN_1, 0);
+      digitalWrite(MOTOR_LEFT_PIN_2, 1);
       //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 1);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
+      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 1);
     break;
 
     case BACK:
-      digitalWrite(MOTOR_LEFT_PIN_1, 0);
-      digitalWrite(MOTOR_LEFT_PIN_2, 1);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 1);
-    break;
-
-    case LEFT:
-      digitalWrite(MOTOR_LEFT_PIN_1, 0);
-      digitalWrite(MOTOR_LEFT_PIN_2, 1);
+      digitalWrite(MOTOR_LEFT_PIN_1, 1);
+      digitalWrite(MOTOR_LEFT_PIN_2, 0);
       //
       digitalWrite(MOTOR_RIGHT_PIN_1, 1);
       digitalWrite(MOTOR_RIGHT_PIN_2, 0);
     break;
 
-    case RIGHT:
+    case LEFT:
       digitalWrite(MOTOR_LEFT_PIN_1, 1);
       digitalWrite(MOTOR_LEFT_PIN_2, 0);
       //
       digitalWrite(MOTOR_RIGHT_PIN_1, 0);
       digitalWrite(MOTOR_RIGHT_PIN_2, 1);
+    break;
+
+    case RIGHT:
+      digitalWrite(MOTOR_LEFT_PIN_1, 0);
+      digitalWrite(MOTOR_LEFT_PIN_2, 1);
+      //
+      digitalWrite(MOTOR_RIGHT_PIN_1, 1);
+      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
     break;
 
     case STOP:
@@ -282,7 +282,6 @@ static void ws_payload_handler(char *payload){
       Serial.printf("Checking type \"%s\"\n", cmd_type->valuestring);
       if(strcmp(cmd_type->valuestring, "robot") == 0){
         robot_command_handler(cmd_json);
-        cJSON_Delete(cmd_json);
       }
     }
 
