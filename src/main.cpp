@@ -1,6 +1,7 @@
 // https://github.com/espressif/arduino-esp32/tree/master/libraries/ESP32/examples/Camera/CameraWebServer
 // https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server/restful_server
 // https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/ws_echo_server
+// https://github.com/espressif/esp-idf/tree/master/examples/storage/sd_card/sdmmc
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -8,9 +9,19 @@
 #include "esp_http_server.h"
 #include "esp_spiffs.h"
 #include "cJSON.h"
+#include "esp_vfs_fat.h"
+#include "driver/sdmmc_host.h"
+#include "sdmmc_cmd.h"
 
 static const char *TAG = "example";
 static const char *REST_TAG = "esp-rest";
+
+#define FLASH_GPIO_NUM 4
+
+// ===================
+// Sdcard
+// ===================
+#define MOUNT_POINT "/sdcard"
 
 // ===================
 // Access Point
@@ -61,13 +72,35 @@ static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 int port_number;
 
+esp_err_t init_sd(void)
+{
+    esp_err_t ret;
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = true,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+    sdmmc_card_t* card;
+    const char mount_point[] = MOUNT_POINT;
+
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+
+    ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
+
+    sdmmc_card_print_info(stdout, card);
+
+    return ret;
+}
+
 // ===================
 // SPIFFS
 // ===================
 esp_err_t init_fs(void)
 {
     esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/www",
+        .base_path = MOUNT_POINT,
         .partition_label = NULL,
         .max_files = 5,
         .format_if_mount_failed = false
@@ -409,30 +442,13 @@ void init_camera(){
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_UXGA;
+  config.frame_size = FRAMESIZE_HD;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   //config.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.grab_mode = CAMERA_GRAB_LATEST; //CAMERA_GRAB_WHEN_EMPTY
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 12;
-  config.fb_count = 1;
-  
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  //                      for larger pre-allocated frame buffer.
-  if(config.pixel_format == PIXFORMAT_JPEG){
-    if(psramFound()){
-      config.jpeg_quality = 10;
-      config.fb_count = 2;
-      config.grab_mode = CAMERA_GRAB_LATEST;
-    } else {
-      // Limit the frame size when PSRAM is not available
-      config.frame_size = FRAMESIZE_SVGA;
-      config.fb_location = CAMERA_FB_IN_DRAM;
-    }
-  } else {
-    // Best option for face detection/recognition
-    config.frame_size = FRAMESIZE_240X240;
-  }
+  config.jpeg_quality = 20;
+  config.fb_count = 2;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -441,34 +457,30 @@ void init_camera(){
   }
 
   sensor_t * s = esp_camera_sensor_get();
-  // initial sensors are flipped vertically and colors are a bit saturated
-  if (s->id.PID == OV3660_PID) {
-    s->set_vflip(s, 1); // flip it back
-    s->set_brightness(s, 1); // up the brightness just a bit
-    s->set_saturation(s, -2); // lower the saturation
-  }
-  // drop down frame size for higher initial frame rate
-  if(config.pixel_format == PIXFORMAT_JPEG){
-    s->set_framesize(s, FRAMESIZE_QVGA);
-  }
+  //s->set_framesize(s, FRAMESIZE_QVGA);
 }
 
 void setup(){
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+  pinMode(FLASH_GPIO_NUM, OUTPUT);
+  digitalWrite(FLASH_GPIO_NUM, HIGH);
 
   // camera init
   init_camera();
 
+  // sdcard init
+  init_sd();
+
   // fs init
-  init_fs();
+  //init_fs();
 
   // wifi init
   init_wifi();
 
   // start webapp and stream server
-  start_server("/www");
+  start_server(MOUNT_POINT);
 }
 
 void loop(){
