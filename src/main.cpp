@@ -1,6 +1,7 @@
 // https://github.com/espressif/arduino-esp32/tree/master/libraries/ESP32/examples/Camera/CameraWebServer
 // https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server/restful_server
 // https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/ws_echo_server
+// https://github.com/espressif/esp-idf/tree/master/examples/storage/sd_card/sdmmc
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -86,21 +87,7 @@ esp_err_t init_sd(void)
 
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
 
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-
-    // To use 1-line SD mode, uncomment the following line:
-    // slot_config.width = 1;
-
-    // GPIOs 15, 2, 4, 12, 13 should have external 10k pull-ups.
-    // Internal pull-ups are not sufficient. However, enabling internal pull-ups
-    // does make a difference some boards, so we do that here.
-    gpio_set_pull_mode((gpio_num_t)15, GPIO_PULLUP_ONLY);   // CMD, needed in 4- and 1- line modes
-    gpio_set_pull_mode((gpio_num_t)2, GPIO_PULLUP_ONLY);    // D0, needed in 4- and 1-line modes
-    gpio_set_pull_mode((gpio_num_t)4, GPIO_PULLUP_ONLY);    // D1, needed in 4-line mode only
-    gpio_set_pull_mode((gpio_num_t)12, GPIO_PULLUP_ONLY);   // D2, needed in 4-line mode only
-    gpio_set_pull_mode((gpio_num_t)13, GPIO_PULLUP_ONLY);   // D3, needed in 4- and 1-line modes
 
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
 
@@ -115,7 +102,7 @@ esp_err_t init_sd(void)
 esp_err_t init_fs(void)
 {
     esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/www",
+        .base_path = MOUNT_POINT,
         .partition_label = NULL,
         .max_files = 5,
         .format_if_mount_failed = false
@@ -187,7 +174,6 @@ static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepa
 
 static esp_err_t webapp_handler(httpd_req_t *req){
     char filepath[FILE_PATH_MAX];
-    strlcat(filepath, MOUNT_POINT, sizeof(filepath));
 
     rest_server_context_t *rest_context = (rest_server_context_t *)req->user_ctx;
     strlcpy(filepath, rest_context->base_path, sizeof(filepath));
@@ -520,7 +506,7 @@ void setup(){
   init_wifi();
 
   // start webapp and stream server
-  start_server("/www");
+  start_server(MOUNT_POINT);
 }
 
 void loop(){
