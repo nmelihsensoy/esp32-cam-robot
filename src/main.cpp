@@ -445,10 +445,10 @@ void init_camera(){
   config.frame_size = FRAMESIZE_HD;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   //config.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.grab_mode = CAMERA_GRAB_LATEST; //CAMERA_GRAB_WHEN_EMPTY
   config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 12;
-  config.fb_count = 1;
+  config.jpeg_quality = 20;
+  config.fb_count = 2;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -456,7 +456,7 @@ void init_camera(){
     return;
   }
 
-  //sensor_t * s = esp_camera_sensor_get();
+  sensor_t * s = esp_camera_sensor_get();
   //s->set_framesize(s, FRAMESIZE_QVGA);
 }
 
