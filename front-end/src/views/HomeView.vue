@@ -17,7 +17,8 @@ export default {
   name: 'HomeView',
   data: function(){
     return{
-      connection: null
+      connection: null,
+      lastKey: null
     }
   },
   methods:{
@@ -26,12 +27,39 @@ export default {
     },
     goRight: function(){
       console.log("right");
-      this.sendSocketMsg('{"type":"robot", "cmd": "right"}');
+      this.connection.send(JSON.stringify({"type" : "robot", "dir": 4}));
     },
     goLeft: function(){
       console.log("left");
+      this.connection.send(JSON.stringify({"type" : "robot", "dir": 3}));
+    },
+    goForward: function(){
+      console.log("forward");
+      this.connection.send(JSON.stringify({"type" : "robot", "dir": 1}));
+    },
+    goBack: function(){
+      console.log("back");
+      this.connection.send(JSON.stringify({"type" : "robot", "dir": 2}));
+    },
+    stopRobot: function(){
+      console.log("stop");
+      this.connection.send(JSON.stringify({"type" : "robot", "dir": 0}));
     },
     handleKeydown (e) {
+
+      if (e.keyCode == 37 ||
+          e.keyCode == 38 ||
+          e.keyCode == 39 ||
+          e.keyCode == 40 ){
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      if (this.lastKey == e.keyCode){
+        return;
+      }
+
+      this.lastKey = e.keyCode
       switch (e.keyCode) {
         case 37:
         this.goLeft();
@@ -39,15 +67,37 @@ export default {
         case 39: 
         this.goRight();
         break;
-        case 40:
-        e.preventDefault();
-        this.goRight();
+        case 38: 
+        this.goForward();
+        break;
+        case 40: 
+        this.goBack();
         break;
       }
     },
     handleKeyup (e) {
-      console.log("keyup");
-      console.log(e);
+      if(e.keyCode == 37 || 
+      e.keyCode == 38 || 
+      e.keyCode == 39 || 
+      e.keyCode == 40){
+        console.log("keyup_stop");
+        //stop
+        e.preventDefault();
+        e.stopPropagation();
+        this.lastKey = null;
+        this.stopRobot();
+      }
+    }
+  },
+  created: function(){
+    this.connection =  new WebSocket("ws://192.168.0.1:82/ws");
+    this.connection.onmessage = function (event){
+      console.log("MESSAGE");
+      console.log(event);
+    }
+    this.connection.onopen = function(event){
+      console.log("WS OPEN");
+      console.log(event);
     }
   },
   beforeMount () {
