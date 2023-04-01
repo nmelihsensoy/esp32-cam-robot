@@ -16,8 +16,6 @@
 static const char *TAG = "example";
 static const char *REST_TAG = "esp-rest";
 
-#define FLASH_GPIO_NUM 4
-
 // ===================
 // Sdcard
 // ===================
@@ -95,12 +93,24 @@ esp_err_t init_sd(void)
 }
 
 // ===================
+// 74HC595
+// ===================
+int latchPin = 3; //ST_CP 
+int clkPin = 1; //SH_CP
+int dtPin = 0; //DS
+
+// ===================
 // L298N
 // ===================
-#define MOTOR_LEFT_PIN_1 14
-#define MOTOR_LEFT_PIN_2 15
-#define MOTOR_RIGHT_PIN_1 13
-#define MOTOR_RIGHT_PIN_2 12
+const byte dirs[5] ={
+  // Q0 Q1 Q2 Q3 Q4 Q5 Q6 Q7
+  // LEFT_PIN1  LEFT_PIN2  RIGHT_PIN1  RIGHT_PIN2  EMPTY  EMPTY  EMPTY  EMPTY
+  0b00000000,  // STOP
+  0b01010000,  // FORWARD
+  0b10100000,  // BACK
+  0b10010000,  // LEFT
+  0b01100000,  // RIGHT
+};
 
 enum DIR{
   STOP = 0,
@@ -244,55 +254,9 @@ static void robot_command_handler(cJSON *json){
   direction = cJSON_GetObjectItem(json, "dir");
   parsedDirection = (DIR)direction->valueint;
 
-  switch (parsedDirection) {
-    case FORWARD:
-      digitalWrite(MOTOR_LEFT_PIN_1, 0);
-      digitalWrite(MOTOR_LEFT_PIN_2, 1);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 1);
-    break;
-
-    case BACK:
-      digitalWrite(MOTOR_LEFT_PIN_1, 1);
-      digitalWrite(MOTOR_LEFT_PIN_2, 0);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 1);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
-    break;
-
-    case LEFT:
-      digitalWrite(MOTOR_LEFT_PIN_1, 1);
-      digitalWrite(MOTOR_LEFT_PIN_2, 0);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 1);
-    break;
-
-    case RIGHT:
-      digitalWrite(MOTOR_LEFT_PIN_1, 0);
-      digitalWrite(MOTOR_LEFT_PIN_2, 1);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 1);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
-    break;
-
-    case STOP:
-      digitalWrite(MOTOR_LEFT_PIN_1, 0);
-      digitalWrite(MOTOR_LEFT_PIN_2, 0);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
-    break;
-
-    default:
-      digitalWrite(MOTOR_LEFT_PIN_1, 0);
-      digitalWrite(MOTOR_LEFT_PIN_2, 0);
-      //
-      digitalWrite(MOTOR_RIGHT_PIN_1, 0);
-      digitalWrite(MOTOR_RIGHT_PIN_2, 0);
-    break;
-  }
+  digitalWrite(latchPin, LOW);
+  shiftOut(dtPin, clkPin, LSBFIRST, dirs[parsedDirection]);
+  digitalWrite(latchPin, HIGH);
 }
 
 static void ws_payload_handler(char *payload){
@@ -486,20 +450,18 @@ void start_server(const char *base_path){
   if (httpd_start(&websocket_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(websocket_httpd, &ws_uri);
   }
+}
 
+void init_io_expander(){
+  pinMode(latchPin, OUTPUT);
+  pinMode(clkPin, OUTPUT);
+  pinMode(dtPin, OUTPUT);
 }
 
 void init_motors(){
-  pinMode(MOTOR_LEFT_PIN_1, OUTPUT);
-  pinMode(MOTOR_LEFT_PIN_2, OUTPUT);
-  pinMode(MOTOR_RIGHT_PIN_1, OUTPUT);
-  pinMode(MOTOR_RIGHT_PIN_2, OUTPUT);
-
-  digitalWrite(MOTOR_LEFT_PIN_1, 1);
-  digitalWrite(MOTOR_LEFT_PIN_2, 1);
-  //
-  digitalWrite(MOTOR_RIGHT_PIN_1, 1);
-  digitalWrite(MOTOR_RIGHT_PIN_2, 1);
+  digitalWrite(latchPin, LOW);
+  shiftOut(dtPin, clkPin, LSBFIRST, dirs[0]);
+  digitalWrite(latchPin, HIGH);
 }
 
 void init_wifi(){
@@ -553,8 +515,8 @@ void setup(){
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
-  pinMode(FLASH_GPIO_NUM, OUTPUT);
-  digitalWrite(FLASH_GPIO_NUM, HIGH);
+
+  init_io_expander();
 
   init_motors();
 
