@@ -84,6 +84,7 @@ esp_err_t init_sd(void)
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
 
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot_config.width = 1;
 
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
 
@@ -97,7 +98,7 @@ esp_err_t init_sd(void)
 // ===================
 int latchPin = 3; //ST_CP 
 int clkPin = 1; //SH_CP
-int dtPin = 0; //DS
+int dtPin = 4; //DS
 
 // ===================
 // L298N
@@ -322,11 +323,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (ws_pkt.type == HTTPD_WS_TYPE_TEXT){
       ws_payload_handler((char*)ws_pkt.payload);
     }
-
-    ret = httpd_ws_send_frame(req, &ws_pkt);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "httpd_ws_send_frame failed with %d", ret);
-    }
+    
     free(buf);
     return ret;
 }
@@ -426,7 +423,8 @@ void start_server(const char *base_path){
           .method     = HTTP_GET,
           .handler    = ws_handler,
           .user_ctx   = NULL,
-          .is_websocket = true
+          .is_websocket = true,
+          .handle_ws_control_frames = true
   };
 
   Serial.printf("Web server started on port: '%d'\n", config.server_port);
@@ -507,14 +505,14 @@ void init_camera(){
     return;
   }
 
-  sensor_t * s = esp_camera_sensor_get();
+  //sensor_t * s = esp_camera_sensor_get();
   //s->set_framesize(s, FRAMESIZE_QVGA);
 }
 
 void setup(){
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-  Serial.println();
+  //Serial.begin(115200);
+  //Serial.setDebugOutput(true);
+  //Serial.println();
 
   init_io_expander();
 
