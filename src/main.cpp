@@ -94,24 +94,21 @@ esp_err_t init_sd(void)
 }
 
 // ===================
-// 74HC595
+// Servo
 // ===================
-int latchPin = 3; //ST_CP 
-int clkPin = 1; //SH_CP
-int dtPin = 4; //DS
+#define CW_T 1280 //140RPM
+#define STOP_T 1520 //0RPM
+#define CCW_T 1720 //140RPM
 
-// ===================
-// L298N
-// ===================
-const byte dirs[5] ={
-  // Q0 Q1 Q2 Q3 Q4 Q5 Q6 Q7
-  // LEFT_PIN1  LEFT_PIN2  RIGHT_PIN1  RIGHT_PIN2  EMPTY  EMPTY  EMPTY  EMPTY
-  0b00000000,  // STOP
-  0b01010000,  // FORWARD
-  0b10100000,  // BACK
-  0b10010000,  // LEFT
-  0b01100000,  // RIGHT
-};
+#define LEFT_SERVO_PIN 3
+#define LEFT_SERVO_CHANNEL LEDC_CHANNEL_2
+
+#define RIGHT_SERVO_PIN 1
+#define RIGHT_SERVO_CHANNEL LEDC_CHANNEL_3
+
+static inline float calculateDuty(int t){
+  return t / (20000 /*20ms*/ / 65536.0 /*16bit*/);
+}
 
 enum DIR{
   STOP = 0,
@@ -255,9 +252,22 @@ static void robot_command_handler(cJSON *json){
   direction = cJSON_GetObjectItem(json, "dir");
   parsedDirection = (DIR)direction->valueint;
 
-  digitalWrite(latchPin, LOW);
-  shiftOut(dtPin, clkPin, LSBFIRST, dirs[parsedDirection]);
-  digitalWrite(latchPin, HIGH);
+  if(parsedDirection == FORWARD){
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CW_T));
+    ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CW_T));
+  }else if(parsedDirection == BACK){
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CCW_T));
+    ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CCW_T));
+  }else if(parsedDirection == LEFT){
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CCW_T));
+    ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CW_T));
+  }else if(parsedDirection == RIGHT){
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CW_T));
+    ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CCW_T));
+  }else{
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(STOP_T));
+    ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(STOP_T));
+  }
 }
 
 static void ws_payload_handler(char *payload){
@@ -450,16 +460,12 @@ void start_server(const char *base_path){
   }
 }
 
-void init_io_expander(){
-  pinMode(latchPin, OUTPUT);
-  pinMode(clkPin, OUTPUT);
-  pinMode(dtPin, OUTPUT);
-}
+void init_servos(){
+  ledcSetup(LEFT_SERVO_CHANNEL, 50/*hz*/, LEDC_TIMER_16_BIT);
+  ledcSetup(RIGHT_SERVO_CHANNEL, 50/*hz*/, LEDC_TIMER_16_BIT);
 
-void init_motors(){
-  digitalWrite(latchPin, LOW);
-  shiftOut(dtPin, clkPin, LSBFIRST, dirs[0]);
-  digitalWrite(latchPin, HIGH);
+  ledcAttachPin(LEFT_SERVO_PIN, LEFT_SERVO_CHANNEL);
+  ledcAttachPin(RIGHT_SERVO_PIN, RIGHT_SERVO_CHANNEL);
 }
 
 void init_wifi(){
@@ -513,23 +519,16 @@ void setup(){
   //Serial.begin(115200);
   //Serial.setDebugOutput(true);
   //Serial.println();
-
-  init_io_expander();
-
-  init_motors();
-
+  // servo init
+  init_servos();
   // camera init
   init_camera();
-
   // sdcard init
   init_sd();
-
   // fs init
   //init_fs();
-
   // wifi init
   init_wifi();
-
   // start webapp and stream server
   start_server(MOUNT_POINT);
 }
