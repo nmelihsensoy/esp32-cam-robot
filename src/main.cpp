@@ -253,16 +253,16 @@ static void robot_command_handler(cJSON *json){
   parsedDirection = (DIR)direction->valueint;
 
   if(parsedDirection == FORWARD){
-    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CW_T));
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CCW_T));
     ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CW_T));
   }else if(parsedDirection == BACK){
-    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CCW_T));
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CW_T));
     ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CCW_T));
   }else if(parsedDirection == LEFT){
-    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CCW_T));
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CW_T));
     ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CW_T));
   }else if(parsedDirection == RIGHT){
-    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CW_T));
+    ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(CCW_T));
     ledcWrite(RIGHT_SERVO_CHANNEL, calculateDuty(CCW_T));
   }else{
     ledcWrite(LEFT_SERVO_CHANNEL, calculateDuty(STOP_T));
