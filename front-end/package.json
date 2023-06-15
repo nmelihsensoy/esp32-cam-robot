@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "serve": "vue-cli-service serve",
-    "build": "vue-cli-service build && mkdir -p ../data && mv dist/* ../data",
+    "build": "vue-cli-service build",
+    "copy-build": "vue-cli-service build && mkdir -p ../data && mv dist/* ../data",
     "lint": "vue-cli-service lint",
     "win-build": "vue-cli-service build"
   },

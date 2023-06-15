@@ -1,47 +1,57 @@
-// https://github.com/espressif/arduino-esp32/tree/master/libraries/ESP32/examples/Camera/CameraWebServer
-// https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server/restful_server
-// https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/ws_echo_server
-// https://github.com/espressif/esp-idf/tree/master/examples/storage/sd_card/sdmmc
+/*
 
-#include <Arduino.h>
+Copyright (c) 2023 N. Melih Sensoy
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
+This code contains codes derived from the following projects, 
+which are issued in the public domain (CC0 license)
+
+https://github.com/espressif/esp-idf/tree/master/examples/protocols/http_server/restful_server
+https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/ws_echo_server
+https://github.com/espressif/esp-idf/tree/master/examples/storage/sd_card/sdmmc
+https://github.com/espressif/esp32-camera/blob/master/README.md
+
+*/
+
+/* Arduino core headers */
 #include <WiFi.h>
-#include "esp_camera.h"
+
+/* ESP-IDF headers */
 #include "esp_http_server.h"
-#include "esp_spiffs.h"
 #include "cJSON.h"
 #include "esp_vfs_fat.h"
 #include "driver/sdmmc_host.h"
-#include "sdmmc_cmd.h"
 
-static const char *TAG = "example";
-static const char *REST_TAG = "esp-rest";
+/* Other libraries */
+#include "esp_camera.h"
 
-// ===================
-// Sdcard
-// ===================
-#define MOUNT_POINT "/sdcard"
+static const char *TAG = "esp-cam"; // used for tagging esp-idf logs
+static const char *REST_TAG = "esp-rest"; //used for tagging esp-idf http logs
 
-// ===================
-// Access Point
-// ===================
+/* Wifi configuration */
 const char* ssid           = "ssidtest";
 const char* password       = "wifipassword";
 const int   channel        = 10;
 const bool  hide_SSID      = false;                  
 const int   max_connection = 1;     
-
-// ===================
-// Static ip
-// ===================
 IPAddress local_ip(192,168,0,1);
 IPAddress gateway(192,168,0,1);
 IPAddress subnet(255,255,255,0);
 IPAddress local_IP(192, 168, 1, 80);
 
-// ===================
-// Select camera model
-// ===================
-//#define CAMERA_MODEL_AI_THINKER // Has PSRAM
+/* Camera Pins of the CAMERA_MODEL_AI_THINKER */
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -61,14 +71,8 @@ IPAddress local_IP(192, 168, 1, 80);
 #define PCLK_GPIO_NUM     22
 camera_config_t config;
 
-// ===================
-// Stream Server
-// ===================
-#define PART_BOUNDARY "123456789000000000000987654321"
-static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
-static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
-static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
-int port_number;
+int port_number; //used for creating multi http server instance
+#define MOUNT_POINT "/sdcard" //shows where to access sd card in the file system
 
 esp_err_t init_sd(void)
 {
@@ -84,32 +88,43 @@ esp_err_t init_sd(void)
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
 
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot_config.width = 1;
+    /* we are changing spi bus to 1bit mode because 4bit mode requires 2pin and 
+    it's already internally connected to the onboard led and causes blink when accessing the sd card */
+    slot_config.width = 1; 
 
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
-
-    sdmmc_card_print_info(stdout, card);
 
     return ret;
 }
 
-// ===================
-// Servo
-// ===================
-#define CW_T 1280 //140RPM
-#define STOP_T 1520 //0RPM
-#define CCW_T 1720 //140RPM
+/* Servo constants & utilities */
+// https://www.mouser.com/datasheet/2/321/900-00360-Feedback-360-HS-Servo-v1.2-1147206.pdf
+#define CW_T 1280 //microseconds, 140RPM
+#define STOP_T 1520 //microseconds, 0RPM
+#define CCW_T 1720 //microseconds, 140RPM
 
-#define LEFT_SERVO_PIN 3
+/* Channel 0 is used by the camera so 2 and 3 chosen for the servos*/
 #define LEFT_SERVO_CHANNEL LEDC_CHANNEL_2
-
-#define RIGHT_SERVO_PIN 1
 #define RIGHT_SERVO_CHANNEL LEDC_CHANNEL_3
 
-static inline float calculateDuty(int t){
-  return t / (20000 /*20ms*/ / 65536.0 /*16bit*/);
+/* We are Using the UART pins because there is no enough pins. */
+#define LEFT_SERVO_PIN 3
+#define RIGHT_SERVO_PIN 1
+
+/* Calculates tick from uS duty cycle
+   Resolution can goes up to 20bit as the LEDC_TIMER_20_BIT exists in ledc_types.h
+   Most servos requires 20ms period
+
+  20000uS = 65536ticks
+  tuS        ?xTick
+  xTick = tuS*65536/20000
+  
+*/
+static inline float calculateDuty(int tuS){
+  return tuS*65536.0/200000;
 }
 
+/* Direction enumeration */
 enum DIR{
   STOP = 0,
   FORWARD = 1,
@@ -118,53 +133,7 @@ enum DIR{
   RIGHT = 4
 };
 
-// ===================
-// SPIFFS
-// ===================
-esp_err_t init_fs(void)
-{
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = MOUNT_POINT,
-        .partition_label = NULL,
-        .max_files = 5,
-        .format_if_mount_failed = false
-    };
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
-
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            //ESP_LOGE(TAG, "Failed to mount or format filesystem");
-            Serial.println("Failed to mount or format filesystem");
-        } else if (ret == ESP_ERR_NOT_FOUND) {
-            //ESP_LOGE(TAG, "Failed to find SPIFFS partition");
-            Serial.println("Failed to find SPIFFS partition");
-        } else {
-            //ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
-            Serial.print("Failed to initialize SPIFFS ");
-            Serial.println(esp_err_to_name(ret));
-        }
-        return ESP_FAIL;
-    }
-
-    size_t total = 0, used = 0;
-    ret = esp_spiffs_info(NULL, &total, &used);
-    if (ret != ESP_OK) {
-        //ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
-        Serial.print("Failed to get SPIFFS partition information");
-        Serial.println(esp_err_to_name(ret));
-    } else {
-        Serial.print("Partition size: total:");
-        Serial.print(total);
-        Serial.print(" ,");
-        Serial.println(used);
-        //ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
-    }
-    return ESP_OK;
-}
-
-// ===================
-// Web App
-// ===================
+/* HTTP server constants & utilities */
 #define ESP_VFS_PATH_MAX 10
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
 #define SCRATCH_BUFSIZE (10240)
@@ -194,6 +163,13 @@ static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepa
     return httpd_resp_set_type(req, type);
 }
 
+/* HTTP header constants for jpeg streaming */
+#define PART_BOUNDARY "123456789000000000000987654321"
+static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
+static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
+static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
+
+/* Maps http routes to file system paths and responds with requested file content */
 static esp_err_t webapp_handler(httpd_req_t *req){
     char filepath[FILE_PATH_MAX];
 
@@ -246,6 +222,7 @@ httpd_handle_t stream_httpd = NULL;
 httpd_handle_t webapp_httpd = NULL;
 httpd_handle_t websocket_httpd = NULL;
 
+/* Turns servos by the json's 'dir' object */
 static void robot_command_handler(cJSON *json){
   const cJSON *direction = NULL;
   DIR parsedDirection = STOP;
@@ -270,6 +247,7 @@ static void robot_command_handler(cJSON *json){
   }
 }
 
+/* Tries to parse given string as json then sends to robot_command_handler */
 static void ws_payload_handler(char *payload){
   //Serial.println(payload);
   const cJSON *cmd_type = NULL;
@@ -292,9 +270,9 @@ static void ws_payload_handler(char *payload){
         robot_command_handler(cmd_json);
       }
     }
-
 }
 
+/* Implements websocket protocol and sends text payloads to ws_payload_handler */
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
@@ -338,14 +316,14 @@ static esp_err_t ws_handler(httpd_req_t *req)
     return ret;
 }
 
+/* Accesses framebuffer stored in the memory by using cam driver, 
+compresses with jpeg then responses in http as chunked manner. forever. */
 static esp_err_t stream_handler(httpd_req_t *req) {
   camera_fb_t * fb = NULL;
   esp_err_t res = ESP_OK;
   size_t _jpg_buf_len = 0;
   uint8_t * _jpg_buf = NULL;
   char * part_buf[64];
-  //struct timeval _timestamp;
-  //char *part_buf[128];
 
   static int64_t last_frame = 0;
   if (!last_frame) {
@@ -365,7 +343,8 @@ static esp_err_t stream_handler(httpd_req_t *req) {
       Serial.println("Camera capture failed"); 
       res = ESP_FAIL;
     } else {
-        if (fb->format != PIXFORMAT_JPEG){
+      if(fb->width > 400){
+          if (fb->format != PIXFORMAT_JPEG){
             bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
             esp_camera_fb_return(fb);
             fb = NULL;
@@ -377,6 +356,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             _jpg_buf_len = fb->len;
             _jpg_buf = fb->buf;
         }
+      }
     }
 
     if (res == ESP_OK) {
@@ -407,6 +387,9 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   return res;
 }
 
+/* Creates the all http server instances and their socket listener freertos tasks.
+  These tasks will execute their assigned handler function when a http request made.
+ */
 void start_server(const char *base_path){
   rest_server_context_t *rest_context = (rest_server_context_t*)calloc(1, sizeof(rest_server_context_t));
   strlcpy(rest_context->base_path, base_path, sizeof(rest_context->base_path));
@@ -415,7 +398,7 @@ void start_server(const char *base_path){
   config.uri_match_fn = httpd_uri_match_wildcard;
 
   httpd_uri_t webapp_get_uri = {
-      .uri = "/*",
+      .uri = "/*", //
       .method = HTTP_GET,
       .handler = webapp_handler,
       .user_ctx = rest_context
@@ -439,7 +422,7 @@ void start_server(const char *base_path){
 
   Serial.printf("Web server started on port: '%d'\n", config.server_port);
   if (httpd_start(&webapp_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(webapp_httpd, &webapp_get_uri);
+    httpd_register_uri_handler(webapp_httpd, &webapp_get_uri);//assigning request handler for port 80
   }
 
   config.server_port += 1;
@@ -447,7 +430,7 @@ void start_server(const char *base_path){
 
   Serial.printf("Stream server started on port: '%d'\n", config.server_port);
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &stream_uri);
+    httpd_register_uri_handler(stream_httpd, &stream_uri);//assigning request handler for port 81
   }
 
   port_number = config.server_port;
@@ -456,11 +439,13 @@ void start_server(const char *base_path){
 
   Serial.printf("Websocket server started on port: '%d'\n", config.server_port);
   if (httpd_start(&websocket_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(websocket_httpd, &ws_uri);
+    httpd_register_uri_handler(websocket_httpd, &ws_uri);//assigning request handler for port 82
   }
 }
 
+
 void init_servos(){
+  /* Most servos requires 50hz pwm signal */
   ledcSetup(LEFT_SERVO_CHANNEL, 50/*hz*/, LEDC_TIMER_16_BIT);
   ledcSetup(RIGHT_SERVO_CHANNEL, 50/*hz*/, LEDC_TIMER_16_BIT);
 
@@ -468,6 +453,7 @@ void init_servos(){
   ledcAttachPin(RIGHT_SERVO_PIN, RIGHT_SERVO_CHANNEL);
 }
 
+/* Creates wifi access point */
 void init_wifi(){
   Serial.println("\n[*] Creating AP");
   WiFi.mode(WIFI_AP);
@@ -496,12 +482,11 @@ void init_camera(){
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_HD;
+  config.xclk_freq_hz = 16000000; //20000000;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
-  //config.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
-  config.grab_mode = CAMERA_GRAB_LATEST; //CAMERA_GRAB_WHEN_EMPTY
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;//CAMERA_GRAB_LATEST; //CAMERA_GRAB_WHEN_EMPTY
   config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.frame_size = FRAMESIZE_HD;
   config.jpeg_quality = 20;
   config.fb_count = 2;
 
@@ -510,29 +495,17 @@ void init_camera(){
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
-
-  //sensor_t * s = esp_camera_sensor_get();
-  //s->set_framesize(s, FRAMESIZE_QVGA);
 }
 
 void setup(){
-  //Serial.begin(115200);
-  //Serial.setDebugOutput(true);
-  //Serial.println();
-  // servo init
-  init_servos();
-  // camera init
+  //Serial.begin(115200); //commented out when debugging
+  init_servos(); //uncommented when debugging
   init_camera();
-  // sdcard init
   init_sd();
-  // fs init
-  //init_fs();
-  // wifi init
   init_wifi();
-  // start webapp and stream server
   start_server(MOUNT_POINT);
 }
 
 void loop(){
-  delay(10000);
+  delay(10);
 }

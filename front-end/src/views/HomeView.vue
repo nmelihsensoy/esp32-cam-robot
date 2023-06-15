@@ -2,7 +2,7 @@
   <div>
     <div class="grid">
       <div>
-      <img id="stream" alt="Stream" src='http://192.168.0.1:81/stream' style="object-fit: contain; height: auto; width:100%; max-height: 60%;"/>
+      <img id="stream" alt="Stream" src='http://192.168.0.1:81/stream'/>
       </div>
     </div>
     <div class="grid">
@@ -107,23 +107,14 @@ export default {
   beforeDestroy () {
     window.removeEventListener('keydown', this.handleKeydown);
     window.removeEventListener('keyup', this.handleKeyup);
-  },
-  created: function(){
-    this.connection = new WebSocket('ws://192.168.0.1:82/ws');
-
-    this.connection.onmessage = function(event){
-      console.log(event);
-    }
-
-    this.connection.onopen = function(event){
-      console.log(event);
-      console.log("socket connected");
-    }
-
   }
 }
 </script>
 
 <style>
-
+  #stream{
+    transform: rotate(180deg);
+    object-fit: contain;
+    height: auto;
+  }
 </style>
