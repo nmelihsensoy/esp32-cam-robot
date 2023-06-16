@@ -72,10 +72,10 @@ IPAddress local_IP(192, 168, 1, 80);
 camera_config_t config;
 
 int port_number; //used for creating multi http server instance
+
 #define MOUNT_POINT "/sdcard" //shows where to access sd card in the file system
 
-esp_err_t init_sd(void)
-{
+esp_err_t init_sd(void){
     esp_err_t ret;
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = true,
@@ -89,7 +89,8 @@ esp_err_t init_sd(void)
 
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
     /* we are changing spi bus to 1bit mode because 4bit mode requires 2pin and 
-    it's already internally connected to the onboard led and causes blink when accessing the sd card */
+    it's already internally connected to the onboard led and 
+    causes blink when accessing the sd card */
     slot_config.width = 1; 
 
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
@@ -113,15 +114,16 @@ esp_err_t init_sd(void)
 
 /* Calculates tick from uS duty cycle
    Resolution can goes up to 20bit as the LEDC_TIMER_20_BIT exists in ledc_types.h
-   Most servos requires 20ms period
+   Most servos requires 20ms period which is 20000uS
 
-  20000uS = 65536ticks
-  tuS        ?xTick
-  xTick = tuS*65536/20000
+    tControl = wanted_tick_length * one_tick_length
+    wanted_tick_length = tControl/one_tick_length
+    one_tick_length =  period/timer_width
+    wanted_tick_length = tControl/(period/timer_width)
   
 */
-static inline float calculateDuty(int tuS){
-  return tuS*65536.0/200000;
+static inline float calculateDuty(int t){ //tControl
+  return t / (20000 / 65536.0 );
 }
 
 /* Direction enumeration */
@@ -398,10 +400,10 @@ void start_server(const char *base_path){
   config.uri_match_fn = httpd_uri_match_wildcard;
 
   httpd_uri_t webapp_get_uri = {
-      .uri = "/*", //
-      .method = HTTP_GET,
-      .handler = webapp_handler,
-      .user_ctx = rest_context
+    .uri = "/*",
+    .method = HTTP_GET,
+    .handler = webapp_handler,
+    .user_ctx = rest_context
   };
   
   httpd_uri_t stream_uri = {
@@ -412,17 +414,18 @@ void start_server(const char *base_path){
   };
 
    httpd_uri_t ws_uri = {
-          .uri        = "/ws",
-          .method     = HTTP_GET,
-          .handler    = ws_handler,
-          .user_ctx   = NULL,
-          .is_websocket = true,
-          .handle_ws_control_frames = true
+    .uri        = "/ws",
+    .method     = HTTP_GET,
+    .handler    = ws_handler,
+    .user_ctx   = NULL,
+    .is_websocket = true,
+    .handle_ws_control_frames = true
   };
 
   Serial.printf("Web server started on port: '%d'\n", config.server_port);
   if (httpd_start(&webapp_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(webapp_httpd, &webapp_get_uri);//assigning request handler for port 80
+    //assigning request handler for port 80
+    httpd_register_uri_handler(webapp_httpd, &webapp_get_uri);
   }
 
   config.server_port += 1;
@@ -430,7 +433,8 @@ void start_server(const char *base_path){
 
   Serial.printf("Stream server started on port: '%d'\n", config.server_port);
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &stream_uri);//assigning request handler for port 81
+    //assigning request handler for port 81
+    httpd_register_uri_handler(stream_httpd, &stream_uri);
   }
 
   port_number = config.server_port;
@@ -439,7 +443,8 @@ void start_server(const char *base_path){
 
   Serial.printf("Websocket server started on port: '%d'\n", config.server_port);
   if (httpd_start(&websocket_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(websocket_httpd, &ws_uri);//assigning request handler for port 82
+    //assigning request handler for port 82
+    httpd_register_uri_handler(websocket_httpd, &ws_uri);
   }
 }
 
