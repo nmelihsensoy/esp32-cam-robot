@@ -1,5 +1,8 @@
 # esp32-cam-robot
 
+| <img src="./docs/robots.png" alt="Robots" width="350px"> |<img src="./docs/diagram.svg" alt="Diagram" width="350px"> |
+| -------------------------------- | -------------------------------- |
+
 ## Build & Upload
 
 ```
@@ -19,5 +22,4 @@ pio run --target uploadfs --environment esp32cam
 
 ## building and uploading web server code to the esp32
 pio run --target upload --environment esp32cam
-
 ```
